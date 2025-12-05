@@ -1,0 +1,2 @@
+# Python dependencies for smart contracts
+python-dateutil==2.8.2
