@@ -1,248 +1,185 @@
 import { useState, useEffect } from "react";
 import ConnectWallet from "./components/ConnectWallet";
 import Dashboard from "./components/Dashboard";
-import Leaderboard from "./components/Leaderboard";
 import AdminPanel from "./components/AdminPanel";
-import { LogOut, Home, Trophy, Settings } from "lucide-react";
+import { LogOut, Home, Trophy, Settings, Loader } from "lucide-react";
 import web3Service from "./utils/web3";
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState("");
-  const [userRole, setUserRole] = useState("student");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isOrganizer, setIsOrganizer] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [network, setNetwork] = useState(null);
 
   const [dashboardData, setDashboardData] = useState({
     totalTokens: 0,
     credentials: 0,
     credentialsList: [],
-    eventHistory: [],
     totalEvents: 0,
+    eventIds: [],
   });
 
-  const [leaderboard, setLeaderboard] = useState([]);
   const [events, setEvents] = useState([]);
 
-  useEffect(() => {
-    if (isConnected) {
-      loadDashboardData();
-      loadLeaderboard();
-      loadEvents();
+  const handleConnect = async () => {
+    setLoading(true);
+    try {
+      const address = await web3Service.init();
+      setWalletAddress(address);
+
+      const networkInfo = await web3Service.getNetwork();
+      setNetwork(networkInfo);
+
+      // Pass the address explicitly to ensure we're checking the new account
+      const admin = await web3Service.isAdmin(address);
+      const organizer = await web3Service.isOrganizer(address);
+
+      setIsAdmin(admin);
+      setIsOrganizer(organizer);
+      setIsConnected(true);
+
+      await loadData();
+    } catch (error) {
+      console.error("Connection error:", error);
+      alert(error.message || "Failed to connect wallet");
+    } finally {
+      setLoading(false);
     }
-  }, [isConnected, walletAddress]);
-  // Add this useEffect below your existing useEffect that loads data
-  useEffect(() => {
-    if (!isConnected) return;
+  };
 
-    // Polling interval, e.g., every 10 seconds
-    const interval = setInterval(() => {
-      loadDashboardData(); // refresh student dashboard
-      loadLeaderboard(); // refresh leaderboard
-      loadEvents(); // refresh available events
-    }, 1000); // 10000 ms = 10 seconds
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [dashboard, allEvents] = await Promise.all([
+        web3Service.getDashboardData(),
+        web3Service.getAllEvents(),
+      ]);
 
-    // Cleanup interval when component unmounts or user disconnects
-    return () => clearInterval(interval);
-  }, [isConnected, walletAddress]);
-
-  const handleConnect = async (address, role) => {
-    web3Service.setCurrentAccount(address);
-    web3Service.setUserRole(role);
-    setWalletAddress(address);
-    setUserRole(role);
-    setIsConnected(true);
+      setDashboardData(dashboard);
+      setEvents(allEvents);
+    } catch (error) {
+      console.error("Error loading data:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDisconnect = () => {
     setIsConnected(false);
     setWalletAddress("");
-    setUserRole("student");
+    setIsAdmin(false);
+    setIsOrganizer(false);
     setActiveTab("dashboard");
+    window.location.reload();
   };
-
-  // const loadDashboardData = async () => {
-  //   setLoading(true);
-  //   try {
-  //     const result = await web3Service.getDashboard();
-  //     setDashboardData(result.data);
-  //   } catch (error) {
-  //     console.error("Failed to load dashboard:", error);
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // };
-  const loadDashboardData = async (isInitial = false) => {
-    if (isInitial) setLoading(true);
-    try {
-      const result = await web3Service.getDashboard();
-      setDashboardData(result.data);
-    } catch (error) {
-      console.error("Failed to load dashboard:", error);
-    } finally {
-      if (isInitial) setLoading(false);
-    }
-  };
-  const loadLeaderboard = async (isInitial = false) => {
-    if (isInitial) setLoading(true);
-    try {
-      const result = await web3Service.getLeaderboard(10);
-      setLeaderboard(result.leaderboard);
-    } catch (error) {
-      console.error("Failed to load leaderboard:", error);
-    } finally {
-      if (isInitial) setLoading(false);
-    }
-  };
-
-  const loadEvents = async (isInitial = false) => {
-    if (isInitial) setLoading(true);
-    try {
-      const result = await web3Service.getEvents();
-      setEvents(result.events);
-    } catch (error) {
-      console.error("Failed to load events:", error);
-    } finally {
-      if (isInitial) setLoading(false);
-    }
-  };
-
-  // const loadLeaderboard = async () => {
-  //   try {
-  //     const result = await web3Service.getLeaderboard(10);
-  //     setLeaderboard(result.leaderboard);
-  //   } catch (error) {
-  //     console.error("Failed to load leaderboard:", error);
-  //   }
-  // };
-
-  // const loadEvents = async () => {
-  //   try {
-  //     const result = await web3Service.getEvents();
-  //     setEvents(result.events);
-  //   } catch (error) {
-  //     console.error("Failed to load events:", error);
-  //   }
-  // };
 
   const handleCreateEvent = async (eventData) => {
+    setLoading(true);
     try {
       await web3Service.createEvent(eventData);
-      await loadEvents();
+      await loadData();
       alert("Event created successfully!");
     } catch (error) {
-      alert("Failed to create event: " + error.message);
+      console.error("Error creating event:", error);
+      alert("Failed to create event: " + (error.reason || error.message));
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleIssueReward = async (rewardData) => {
+  const handleRecordAttendance = async (attendanceData) => {
+    setLoading(true);
     try {
-      await web3Service.issueReward(
-        rewardData.recipient,
-        rewardData.amount,
-        rewardData.reason
+      await web3Service.recordAttendance(
+        attendanceData.eventId,
+        attendanceData.studentAddress
       );
-
-      // OPTIMISTIC UPDATE
-      setDashboardData((prev) => ({
-        ...prev,
-        totalTokens: prev.totalTokens + rewardData.amount,
-        // optionally update leaderboard if the user is current wallet
-        eventHistory: [
-          ...prev.eventHistory,
-          {
-            eventName: rewardData.reason,
-            eventType: "direct_reward",
-            tokensEarned: rewardData.amount,
-            certificateId: null,
-          },
-        ],
-      }));
-
-      alert("Reward issued successfully!");
-    } catch (error) {
-      alert("Failed to issue reward: " + error.message);
-    }
-  };
-
-  const handleRecordAttendance = async ({ eventId, studentAddress }) => {
-    try {
-      await web3Service.recordAttendance(eventId, studentAddress);
-
-      // find the event
-      const event = events.find((e) => e.id === eventId);
-      if (!event) return;
-
-      // OPTIMISTIC UPDATE if current wallet matches
-      if (studentAddress.toLowerCase() === walletAddress.toLowerCase()) {
-        setDashboardData((prev) => ({
-          ...prev,
-          totalTokens: prev.totalTokens + event.rewardAmount,
-          totalEvents: prev.totalEvents + 1,
-          eventHistory: [
-            ...prev.eventHistory,
-            {
-              eventName: event.name,
-              eventType: event.type,
-              tokensEarned: event.rewardAmount,
-              certificateId: event.issueCertificate
-                ? `CERT_${Date.now()}`
-                : null,
-            },
-          ],
-          credentials: prev.credentials + (event.issueCertificate ? 1 : 0),
-          credentialsList: event.issueCertificate
-            ? [
-                ...prev.credentialsList,
-                { id: `CERT_${Date.now()}`, name: event.name },
-              ]
-            : prev.credentialsList,
-        }));
-      }
-
+      await loadData();
       alert("Attendance recorded successfully!");
     } catch (error) {
-      alert("Failed to record attendance: " + error.message);
+      console.error("Error recording attendance:", error);
+      alert("Failed to record attendance: " + (error.reason || error.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRecordMultipleAttendance = async (eventId, students) => {
+    setLoading(true);
+    try {
+      await web3Service.recordMultipleAttendance(eventId, students);
+      await loadData();
+      alert(`Attendance recorded for ${students.length} students!`);
+    } catch (error) {
+      console.error("Error recording multiple attendance:", error);
+      alert("Failed to record attendance: " + (error.reason || error.message));
+    } finally {
+      setLoading(false);
     }
   };
 
   if (!isConnected) {
-    return <ConnectWallet onConnect={handleConnect} />;
+    return <ConnectWallet onConnect={handleConnect} loading={loading} />;
   }
 
-  const tabs = [
-    { id: "dashboard", label: "Dashboard", icon: Home },
-    { id: "leaderboard", label: "Leaderboard", icon: Trophy },
-  ];
+  const tabs = [{ id: "dashboard", label: "Dashboard", icon: Home }];
 
-  if (userRole === "admin" || userRole === "organizer") {
+  if (isAdmin || isOrganizer) {
     tabs.push({
       id: "admin",
-      label: userRole === "admin" ? "Admin" : "Manage",
+      label: isAdmin ? "Admin" : "Manage",
       icon: Settings,
     });
   }
 
+  const getNetworkName = () => {
+    if (!network) return "";
+    const names = {
+      1: "Ethereum Mainnet",
+      11155111: "Sepolia Testnet",
+      1337: "Local Network",
+    };
+    return names[network.chainId] || `Chain ${network.chainId}`;
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-900">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
+      <header className="bg-gray-800 border-b border-gray-700 shadow-xl">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className="text-2xl font-bold text-white">
                 Student Rewards DApp
               </h1>
-              <p className="text-sm text-gray-600">
-                {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)} •{" "}
-                {userRole}
-              </p>
+              <div className="flex items-center gap-3 mt-1">
+                <p className="text-sm text-gray-400 font-mono">
+                  {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+                </p>
+                {network && (
+                  <>
+                    <span className="text-gray-600">•</span>
+                    <p className="text-sm text-gray-500">{getNetworkName()}</p>
+                  </>
+                )}
+                {(isAdmin || isOrganizer) && (
+                  <>
+                    <span className="text-gray-600">•</span>
+                    <span className="px-2 py-0.5 bg-indigo-600/30 text-indigo-300 text-xs rounded-full font-medium border border-indigo-500/50">
+                      {isAdmin ? "Admin" : "Organizer"}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
             <button
               onClick={handleDisconnect}
-              className="flex items-center px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              className="flex items-center px-4 py-2 text-gray-300 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors border border-gray-600"
             >
-              <LogOut className="w-5 h-5 mr-2" />
+              <LogOut className="w-5 h-5 mr-2 text-gray-400" />
               Disconnect
             </button>
           </div>
@@ -250,7 +187,7 @@ export default function App() {
       </header>
 
       {/* Navigation Tabs */}
-      <div className="bg-white border-b border-gray-200">
+      <div className="bg-gray-800 border-b border-gray-700 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex space-x-8">
             {tabs.map((tab) => {
@@ -261,8 +198,8 @@ export default function App() {
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex items-center py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
                     activeTab === tab.id
-                      ? "border-indigo-500 text-indigo-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                      ? "border-indigo-500 text-indigo-400"
+                      : "border-transparent text-gray-400 hover:text-white hover:border-gray-500"
                   }`}
                 >
                   <Icon className="w-5 h-5 mr-2" />
@@ -274,36 +211,35 @@ export default function App() {
         </div>
       </div>
 
+      {/* Loading Overlay */}
+      {loading && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-8 flex flex-col items-center shadow-2xl">
+            <Loader className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
+            <p className="text-white font-semibold text-lg">
+              Processing transaction...
+            </p>
+            <p className="text-sm text-gray-400 mt-1">
+              Please confirm in MetaMask
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {loading && activeTab === "dashboard" ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600" />
-          </div>
-        ) : (
-          <>
-            {activeTab === "dashboard" && (
-              <Dashboard dashboardData={dashboardData} />
-            )}
+        {activeTab === "dashboard" && (
+          <Dashboard dashboardData={dashboardData} />
+        )}
 
-            {activeTab === "leaderboard" && (
-              <Leaderboard
-                leaderboard={leaderboard}
-                currentUser={walletAddress}
-              />
-            )}
-
-            {activeTab === "admin" &&
-              (userRole === "admin" || userRole === "organizer") && (
-                <AdminPanel
-                  userRole={userRole}
-                  onCreateEvent={handleCreateEvent}
-                  onIssueReward={handleIssueReward}
-                  onRecordAttendance={handleRecordAttendance}
-                  events={events}
-                />
-              )}
-          </>
+        {activeTab === "admin" && (isAdmin || isOrganizer) && (
+          <AdminPanel
+            isAdmin={isAdmin}
+            onCreateEvent={handleCreateEvent}
+            onRecordAttendance={handleRecordAttendance}
+            onRecordMultipleAttendance={handleRecordMultipleAttendance}
+            events={events}
+          />
         )}
       </main>
     </div>
